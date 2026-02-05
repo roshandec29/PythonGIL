@@ -207,21 +207,33 @@ def run_multiprocess():
 
 For computational tasks, parallelism is an illusion. Threads trade the lock back and forth:
 
+**Note:** The code snippets are simplified for educational purposes. 
+   The actual CPython GIL uses condition variables and holds the lock 
+   for multiple bytecode instructions (not just one). 
+   
+   See the real implementation: 
+   https://github.com/python/cpython/blob/main/Python/ceval_gil.c
+
 ```c
 /* Internal CPython execution loop (simplified) */
-for (;;) {
-    pthread_mutex_lock(&_PyRuntime.ceval.gil.mutex);
+
+// Thread 1 wants to execute
+take_gil(thread1_state);  // Blocks until GIL is available
+
+// Now Thread 1 holds the GIL and executes multiple instructions
+for (int i = 0; i < 100; i++) {  // ~100 bytecodes or 5ms
+    execute_bytecode();
     
-    // Execute ONE bytecode instruction
-    PyObject *result = PyEval_EvalFrameEx(frame, throwflag);
-    
-    pthread_mutex_unlock(&_PyRuntime.ceval.gil.mutex);
-    
-    // Check if we need to switch threads (every 5ms or 100 bytecodes)
-    if (should_switch_thread()) {
-        // Force context switch, another thread takes the lock
+    if (gil_drop_request || time_exceeded) {
+        break;  // Time to release
     }
 }
+
+drop_gil(thread1_state);  // Release for others
+
+// Thread 2 can now acquire the GIL
+take_gil(thread2_state);
+// ... and so on
 ```
 
 **2. The "Wait and Suspend" Cycle**
